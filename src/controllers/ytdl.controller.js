@@ -5,6 +5,7 @@ const ytdl = require('ytdl-core');
 const cp = require('child_process');
 const readline = require('readline');
 const ffmpeg = require('ffmpeg-static');
+const cors = require('cors');
 
 const {
     getVideoMetadata,
@@ -13,13 +14,31 @@ const {
     trimYTFormatVideo,
     getDownloadDirectory,
     downloadFile,
-    trimVideo
+    TrimvideodownloadFile,
+    trimVideo,
+    trimmingVideo
 } = require('../services/ytdl.service');
 const { response } = require('express');
 const { url } = require('inspector');
+const allowedOrigins = [
+    'capacitor://localhost',
+    'ionic://localhost',
+    'http://localhost',
+    'http://localhost:8080',
+    'http://localhost:3000',
+    'http://localhost:8100',
+];
+const corsOptions = {
+    origin: (origin, callback) => {
+        if (allowedOrigins.includes(origin) || !origin) {
+            callback(null, true);
+        } else {
+            callback(new Error('Origin not allowed by CORS'));
+        }
+    },
+};
 
-
-const getInfo = async (req, res, next) => {
+const getInfo = async(req, res, next) => {
     try {
         let url = req.query.url;
         let dataReturned = await getVideoMetadata(url);
@@ -50,8 +69,9 @@ const getInfo = async (req, res, next) => {
 }
 router.get('/info', getInfo);
 
-const download = async (req, res) => {
+const download = async(req, res) => {
     // Body contents
+    console.log('download api called !')
     let videoId = req.query.videoId;
     let itag = req.query.itag;
     let type = req.query.type;
@@ -70,7 +90,7 @@ const download = async (req, res) => {
             }
             await ytdl(`http://www.youtube.com/watch?v=${videoId}`, { itag: itag }).pipe(res);
         } catch (error) {
-            console.log(error);
+            console.log("error is ", error);
         }
     } else if (type === "merge") {
         let audioSize = 0;
@@ -168,65 +188,148 @@ const download = async (req, res) => {
 }
 router.get('/download', download);
 
-const downloadTrimmedVideo = async (req, res, next) => {
-    try {
-        // console.log(JSON.stringify(req.body));
-        let { filename, format, startTime, endTime } = req.body;
-        filename = filename.split(' ').join('_');
-        filename = filename.split('|').join('I');
-        filename = filename.split('(').join('');
-        filename = filename.split(')').join('');
-        filename = filename.split('#').join('');
-        // console.log("request body", req.body);
-        startTime = Number(startTime);
-        endTime = Number(endTime);
+const downloadTrimmedVideo = async(req, res, next) => {
+        // res.header("Access-Control-Allow-Origin", "*");
+        // res.header("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS,POST,PUT");
+        // res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, x-client-key, x-client-token, x-client-secret, Authorization");
+        try {
+            // console.log(JSON.stringify(req.body));
+            console.log('api called for triming and downloading')
+            let { filename, format, startTime, endTime } = req.body;
+            filename = filename.split(' ').join('_');
+            filename = filename.split('|').join('I');
+            filename = filename.split('(').join('');
+            filename = filename.split(')').join('');
+            filename = filename.split('#').join('');
+            // console.log("request body", req.body);
 
-        let downloadResult = await trimYTFormatVideo(filename, format, startTime, endTime);
+            startTime = Number(startTime);
+            endTime = Number(endTime);
 
-        if (downloadResult.apiStatus === "SUCCESS") {
-            res.status(200).json({
-                apiStatus: "SUCCESS",
-                data: downloadResult.data
-            });
-
-            // await res.sendFile(downloadResult.data.file
-            // await res.download(downloadResult.data.file, `trimmed.${format.extension}`, (err) => {
-            //     if(err) {
-            //         console.error("ERROR IN SENDING A TRIMMED FILE...", err);
-            //     }
-            // })
-        } else {
-            res.status(500).json({
-                apiStatus: "FAILURE",
-                data: downloadResult.data
-            });
-        }
+            // let downloadResult = await trimYTFormatVideo(filename, format, startTime, endTime);
+            let fileNameToStoreDownloaded = 'downloaded' + '.' + format.container;
+            let downloadResult = await TrimvideodownloadFile(format.url, fileNameToStoreDownloaded, startTime, endTime);
+            console.log("RESULT", downloadResult);
 
 
-    } catch (error) {
-        console.error("ERROR IN downloadTrimmedVideo");
-        console.error(error)
-        if (error.code === "ERR_REQUEST_CANCELLED") {
-            res.status(500).json({
-                apiStatus: "FAILURE",
-                data: {
-                    message: "File size greater than Threshold limit"
-                }
-            });
-        } else {
-            res.status(statusCode).json({
-                apiStatus: "FAILURE",
-                data: {
-                    message: "Internal Server Error"
-                }
-            });
+            if (downloadResult.apiStatus === "SUCCESS") {
+                console.log('sucsses')
+                res.status(200).json({
+                    apiStatus: "SUCCESS",
+                    data: downloadResult.data
+                });
+
+                // await res.sendFile(downloadResult.data.file
+                // await res.download(downloadResult.data.file, `trimmed.${format.extension}`, (err) => {
+                //     if(err) {
+                //         console.error("ERROR IN SENDING A TRIMMED FILE...", err);
+                //     }
+                // })
+            } else {
+                res.status(500).json({
+                    apiStatus: "FAILURE",
+                    data: downloadResult.data
+                });
+            }
+
+
+        } catch (error) {
+            console.error("ERROR IN downloadTrimmedVideo");
+            console.error(error)
+            if (error.code === "ERR_REQUEST_CANCELLED") {
+                res.status(500).json({
+                    apiStatus: "FAILURE",
+                    data: {
+                        message: "File size greater than Threshold limit"
+                    }
+                });
+            } else {
+                res.status(500).json({
+                    apiStatus: "FAILURE",
+                    data: {
+                        message: "Internal Server Error"
+                    }
+                });
+            }
         }
     }
-}
+    // router.post('/downloadTrimmedFile', cors(corsOptions), downloadTrimmedVideo);
 router.post('/downloadTrimmedFile', downloadTrimmedVideo);
 
-const downloadMergedTrimmedVideo = async (req, res, next) => {
+const TrimmingVideo = async(req, res, next) => {
+
+        try {
+            console.log('TrimVideo api called !')
+                // res.header("Access-Control-Allow-Origin", "*");
+                // res.header("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS,POST,PUT");
+                // res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, x-client-key, x-client-token, x-client-secret, Authorization");
+                // console.log(JSON.stringify(req.body));
+            let { directory, downloaded_link, format, startTime, endTime } = req.body;
+            // filename = filename.split(' ').join('_');
+            // filename = filename.split('|').join('I');
+            // filename = filename.split('(').join('');
+            // filename = filename.split(')').join('');
+            // filename = filename.split('#').join('');
+            // console.log("request body", req.body);
+            // console.log("downloadlink");
+            // console.log(downloaded_link);
+            startTime = Number(startTime);
+            endTime = Number(endTime);
+
+            // let downloadResult = await trimYTFormatVideo(filename, format, startTime, endTime);
+            let fileNameToStoreDownloaded = 'trimmed' + '.' + format.container;
+            let trimmedFilePath = path.join(directory + fileNameToStoreDownloaded);
+            let downloadResult = await trimVideo(downloaded_link, trimmedFilePath, startTime, endTime);
+            console.log("RESULT is ", downloadResult);
+
+            if (downloadResult == true) {
+                console.log('sucsess')
+                res.status(200).json({
+                    apiStatus: "SUCCESS",
+                    data: downloadResult
+                });
+
+                // await res.sendFile(downloadResult.data.file
+                // await res.download(downloadResult.data.file, `trimmed.${format.extension}`, (err) => {
+                //     if(err) {
+                //         console.error("ERROR IN SENDING A TRIMMED FILE...", err);
+                //     }
+                // })
+            } else {
+                res.status(500).json({
+                    apiStatus: "FAILURE",
+                    data: downloadResult.data
+                });
+            }
+
+
+        } catch (error) {
+            console.error("ERROR IN downloadTrimmedVideo");
+            console.error(error)
+            if (error.code === "ERR_REQUEST_CANCELLED") {
+                res.status(500).json({
+                    apiStatus: "FAILURE",
+                    data: {
+                        message: "File size greater than Threshold limit"
+                    }
+                });
+            } else {
+                res.status(statusCode).json({
+                    apiStatus: "FAILURE",
+                    data: {
+                        message: "Internal Server Error"
+                    }
+                });
+            }
+        }
+    }
+    // router.post('/downloadTrimmedFile2', cors(corsOptions), TrimmingVideo);
+    // router.post('/downloadTrimmedFile2',  TrimmingVideo);
+
+
+const downloadMergedTrimmedVideo = async(req, res, next) => {
     try {
+        console.log('downloadMergedTrimmedVideo api called ')
         let videoId = req.body.videoId;
         let itag = req.body.itag;
         let startTime = req.body.startTime;
@@ -275,13 +378,13 @@ const downloadMergedTrimmedVideo = async (req, res, next) => {
         let trimmedFilename = "trimmed." + videoFormat.container;
         let audioVideoMergeCommand = `ffmpeg -i ${videoPath} -i ${audioPath} -c:v copy -c:a aac ${downloadPath}${outputFilename}`;
 
-        cp.exec(audioVideoMergeCommand, async () => {
+        cp.exec(audioVideoMergeCommand, async() => {
             let mergedFilePath = downloadPath + outputFilename;
             let trimmedFilePath = downloadPath + trimmedFilename;
             await trimVideo(mergedFilePath, trimmedFilePath, startTime, endTime);
 
             let pathArray = trimmedFilePath.split(path.sep);
-            pathArray = pathArray.slice(pathArray.indexOf('downloads')+1, pathArray.length);
+            pathArray = pathArray.slice(pathArray.indexOf('downloads') + 1, pathArray.length);
             let downloadLink = pathArray.join('/');
 
             res.status(200).json({
@@ -312,5 +415,8 @@ const downloadMergedTrimmedVideo = async (req, res, next) => {
     }
 }
 router.post('/downloadMergedTrimmedVideo', downloadMergedTrimmedVideo);
+
+
+
 
 module.exports = router;
